@@ -56,7 +56,7 @@ def updateWalls(x, y, orient, L, R, F):
             API.setWall(x, y, "s")
         elif orient == 3:
             API.setWall(x, y, "w")
-        API.setColor(x, y, "R")
+        #API.setColor(x, y, "R")
 
     if L:
         if orient == 0:
@@ -67,7 +67,7 @@ def updateWalls(x, y, orient, L, R, F):
             API.setWall(x, y, "e")
         elif orient == 3:
             API.setWall(x, y, "s")
-        API.setColor(x, y, "R")
+        #API.setColor(x, y, "R")
 
     if R:
         if orient == 0:
@@ -78,10 +78,10 @@ def updateWalls(x, y, orient, L, R, F):
             API.setWall(x, y, "w")
         elif orient == 3:
             API.setWall(x, y, "n")
-        API.setColor(x, y, "R")
+        #API.setColor(x, y, "R")
 
 
-    # --- Your original encoding logic (unchanged) ---
+    
     if(L and R and F):
         if (orient==0): 
             cells[y][x]= 13
