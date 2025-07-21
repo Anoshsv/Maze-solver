@@ -1,508 +1,186 @@
 import API
 import sys
+from collections import deque
 
-x=0
-y=0
-orient=0
-cells = [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]]
-cell = 0
-flood=[[14,13,12,11,10,9,8,7,7,8,9,10,11,12,13,14],
-        [13,12,11,10,9,8,7,6,6,7,8,9,10,11,12,13],
-        [12,11,10,9,8,7,6,5,5,6,7,8,9,10,11,12],
-        [11,10,9,8,7,6,5,4,4,5,6,7,8,9,10,11],
-        [10,9,8,7,6,5,4,3,3,4,5,6,7,8,9,10],
-        [9,8,7,6,5,4,3,2,2,3,4,5,6,7,8,9],
-        [8,7,6,5,4,3,2,1,1,2,3,4,5,6,7,8],
-        [7,6,5,4,3,2,1,0,0,1,2,3,4,5,6,7],
-        [7,6,5,4,3,2,1,0,0,1,2,3,4,5,6,7],
-        [8,7,6,5,4,3,2,1,1,2,3,4,5,6,7,8],
-        [9,8,7,6,5,4,3,2,2,3,4,5,6,7,8,9],
-        [10,9,8,7,6,5,4,3,3,4,5,6,7,8,9,10],
-        [11,10,9,8,7,6,5,4,4,5,6,7,8,9,10,11],
-        [12,11,10,9,8,7,6,5,5,6,7,8,9,10,11,12],
-        [13,12,11,10,9,8,7,6,6,7,8,9,10,11,12,13],
-        [14,13,12,11,10,9,8,7,7,8,9,10,11,12,13,14]]
-'''
-cell
-refer walls in notebook
-    '''
+x = 0
+y = 0
+orient = 0
+cells = [[0 for _ in range(16)] for _ in range(16)]
+
+flood = [[abs(7 - x) + abs(7 - y) if x <= 7 and y <= 7 else
+          abs(8 - x) + abs(7 - y) if x > 7 and y <= 7 else
+          abs(7 - x) + abs(8 - y) if x <= 7 and y > 7 else
+          abs(8 - x) + abs(8 - y)
+          for x in range(16)] for y in range(16)]
+
+
+highlighted_path = set()
 
 
 def log(string):
     sys.stderr.write("{}\n".format(string))
 
+DIR_VEC = {'n': (0, 1), 'e': (1, 0), 's': (0, -1), 'w': (-1, 0)}
+OPP_DIR = {'n': 's', 's': 'n', 'e': 'w', 'w': 'e'}
+
+def _record_wall(x, y, direction):
+    updateWalls.walls[(x, y, direction)] = True
+    dx, dy = DIR_VEC[direction]
+    xn, yn = x + dx, y + dy
+    if 0 <= xn < 16 and 0 <= yn < 16:
+        updateWalls.walls[(xn, yn, OPP_DIR[direction])] = True
+
 def updateWalls(x, y, orient, L, R, F):
-    if F:
-        if orient == 0:
-            API.setWall(x, y, "n")
-        elif orient == 1:
-            API.setWall(x, y, "e")
-        elif orient == 2:
-            API.setWall(x, y, "s")
-        elif orient == 3:
-            API.setWall(x, y, "w")
-        #API.setColor(x, y, "R")
+    if not hasattr(updateWalls, 'walls'):
+        updateWalls.walls = {}
 
-    if L:
-        if orient == 0:
-            API.setWall(x, y, "w")
-        elif orient == 1:
-            API.setWall(x, y, "n")
-        elif orient == 2:
-            API.setWall(x, y, "e")
-        elif orient == 3:
-            API.setWall(x, y, "s")
-        #API.setColor(x, y, "R")
+    rel_sensors = [('L', L), ('F', F), ('R', R)]
+    for rel_name, present in rel_sensors:
+        if not present:
+            continue
+        if rel_name == 'F':
+            abs_dir = ['n', 'e', 's', 'w'][orient]
+        elif rel_name == 'R':
+            abs_dir = ['e', 's', 'w', 'n'][orient]
+        else:  # 'L'
+            abs_dir = ['w', 'n', 'e', 's'][orient]
 
-    if R:
-        if orient == 0:
-            API.setWall(x, y, "e")
-        elif orient == 1:
-            API.setWall(x, y, "s")
-        elif orient == 2:
-            API.setWall(x, y, "w")
-        elif orient == 3:
-            API.setWall(x, y, "n")
-        #API.setColor(x, y, "R")
+        API.setWall(x, y, abs_dir)
+        _record_wall(x, y, abs_dir)
 
 
+def hasWall(x, y, direction):
+    if not hasattr(updateWalls, 'walls'):
+        return False
+    return updateWalls.walls.get((x, y, direction), False)
+
+
+def isAccessible(x, y, x1, y1):
+    if abs(x - x1) + abs(y - y1) != 1:
+        return False
     
-    if(L and R and F):
-        if (orient==0): 
-            cells[y][x]= 13
-        elif (orient==1): 
-            cells[y][x]= 12
-        elif (orient==2): 
-            cells[y][x]= 11
-        elif (orient==3): 
-            cells[y][x]= 14
+    if x1 == x and y1 == y + 1:  # Going north
+        return not hasWall(x, y, "n")
+    elif x1 == x + 1 and y1 == y:  # Going east
+        return not hasWall(x, y, "e")
+    elif x1 == x and y1 == y - 1:  # Going south
+        return not hasWall(x, y, "s")
+    elif x1 == x - 1 and y1 == y:  # Going west
+        return not hasWall(x, y, "w")
+    
+    return False
 
-    elif (L and R and not F):
-        if (orient==0 or orient== 2): 
-            cells[y][x]= 9
-        elif (orient==1 or orient==3): 
-            cells[y][x]= 10
 
-    elif (L and F and not R):
-        if (orient==0): 
-            cells[y][x]= 8
-        elif (orient==1): 
-            cells[y][x]= 7
-        elif (orient==2): 
-            cells[y][x]= 6
-        elif (orient==3): 
-            cells[y][x]= 5
+def getSurrounds(x, y):
+    x0, y0 = x, y + 1
+    x1, y1 = x + 1, y
+    x2, y2 = x, y - 1
+    x3, y3 = x - 1, y
+    return (
+        (x0 if y0 < 16 else -1, y0 if y0 < 16 else -1),
+        (x1 if x1 < 16 else -1, y1),
+        (x2, y2 if y2 >= 0 else -1),
+        (x3 if x3 >= 0 else -1, y3),
+    )
 
-    elif (R and F and not L):
-        if (orient==0): 
-            cells[y][x]= 7
-        elif (orient==1): 
-            cells[y][x]= 6
-        elif (orient==2): 
-            cells[y][x]= 5
-        elif (orient==3): 
-            cells[y][x]= 8
 
-    elif(F):
-        if (orient==0): 
-            cells[y][x]= 2
-        elif (orient==1): 
-            cells[y][x]= 3
-        elif (orient==2): 
-            cells[y][x]= 4
-        elif (orient==3): 
-            cells[y][x]= 1
-
-    elif(L):
-        if (orient==0): 
-            cells[y][x]= 1
-        elif (orient==1): 
-            cells[y][x]= 2
-        elif (orient==2): 
-            cells[y][x]= 3
-        elif (orient==3): 
-            cells[y][x]= 4
-
-    elif(R):
-        if (orient==0): 
-            cells[y][x]= 3
-        elif (orient==1): 
-            cells[y][x]= 4
-        elif (orient==2): 
-            cells[y][x]= 1
-        elif (orient==3): 
-            cells[y][x]= 2
-
-def isAccessible(x,y,x1,y1):
-    '''returns True if mouse can move to x1,y1 from x,y (two adjescent cells)
-    '''
-    if (x==x1):
-        if(y>y1):
-            if(cells[y][x]==4 or cells[y][x]==5 or cells[y][x]==6 or cells[y][x]==10 or cells[y][x]==11 or cells[y][x]==12 or cells[y][x]==14 ):
-                return (False)
+def floodFill():
+    # Reset all flood values except goal cells
+    for y_iter in range(16):
+        for x_iter in range(16):
+            if (x_iter, y_iter) in [(7, 7), (7, 8), (8, 7), (8, 8)]:
+                flood[y_iter][x_iter] = 0
             else:
-                return(True)
-        else:
-            if(cells[y][x]==2 or cells[y][x]==7 or cells[y][x]==8 or cells[y][x]==10 or cells[y][x]==12 or cells[y][x]==13 or cells[y][x]==14 ):
-                return (False)
-            else:
-                return(True)
+                flood[y_iter][x_iter] = 1000
+
+    # BFS from goal cells outward
+    queue = deque([(7, 7), (7, 8), (8, 7), (8, 8)])
+
+    while queue:
+        x_curr, y_curr = queue.popleft()
+        curr_val = flood[y_curr][x_curr]
+
+        # Check all 4 directions
+        for dx, dy, direction in [(0, 1, 'n'), (1, 0, 'e'), (0, -1, 's'), (-1, 0, 'w')]:
+            x_n = x_curr + dx
+            y_n = y_curr + dy
             
-    elif (y==y1):
-        if(x>x1):
-            if(cells[y][x]==1 or cells[y][x]==5 or cells[y][x]==8 or cells[y][x]==9 or cells[y][x]==11 or cells[y][x]==13 or cells[y][x]==14 ):
-                return (False)
-            else:
-                return (True)
+            if 0 <= x_n < 16 and 0 <= y_n < 16:
+                # Check if there's no wall between current and neighbor
+                if not hasWall(x_curr, y_curr, direction):
+                    if flood[y_n][x_n] > curr_val + 1:
+                        flood[y_n][x_n] = curr_val + 1
+                        queue.append((x_n, y_n))
+
+
+def highlightPath(x, y):
+    global highlighted_path
+    # Clear previous highlights
+    for (hx, hy) in highlighted_path:
+        API.clearColor(hx, hy)
+    highlighted_path.clear()
+
+    visited = set()
+    new_path = set()
+    while flood[y][x] != 0:
+        API.setColor(x, y, "B")
+        new_path.add((x, y))
+        visited.add((x, y))
+        minVal = flood[y][x]
+        next_cell = None
+        for xi, yi in getSurrounds(x, y):
+            if (xi >= 0 and yi >= 0 and isAccessible(x, y, xi, yi) and
+                    flood[yi][xi] < minVal and (xi, yi) not in visited):
+                minVal = flood[yi][xi]
+                next_cell = (xi, yi)
+        if next_cell:
+            x, y = next_cell
         else:
-            if(cells[y][x]==3 or cells[y][x]==6 or cells[y][x]==7 or cells[y][x]==9 or cells[y][x]==11 or cells[y][x]==12 or cells[y][x]==13 ):
-                return (False)
-            else:
-                return (True)
+            break
+    API.setColor(x, y, "B")
+    new_path.add((x, y))
+    highlighted_path = new_path
 
-def getSurrounds(x,y):
-    ''' returns x1,y1,x2,y2,x3,y3,x4,y4 the four surrounding square
-    '''
-    x3= x-1
-    y3=y
-    x0=x
-    y0=y+1
-    x1=x+1
-    y1=y
-    x2=x
-    y2=y-1
-    if(x1>=16):
-        x1=-1
-    if(y0>=16):
-        y0=-1
-    return (x0,y0,x1,y1,x2,y2,x3,y3)  #order of cells- north,east,south,west
 
-def isConsistant(x,y):
-    '''returns True if the value of current squre is one
-    greater than the minumum value in an accessible neighbour
-    '''
-    x0,y0,x1,y1,x2,y2,x3,y3 = getSurrounds(x,y)
-    val= flood[y][x]
-    minVals=[-1,-1,-1,-1]
-    if (x0>=0 and y0>=0):
-        if (isAccessible(x,y,x0,y0)):
-            minVals[0]=flood[y0][x0]
-    if (x1>=0 and y1>=0):
-        if (isAccessible(x,y,x1,y1)):
-            minVals[1]=flood[y1][x1]
-    if (x2>=0 and y2>=0):
-        if (isAccessible(x,y,x2,y2)):
-            minVals[2]=flood[y2][x2]
-    if (x3>=0 and y3>=0):
-        if (isAccessible(x,y,x3,y3)):
-            minVals[3]=flood[y3][x3]
+def toMove(x, y, xprev, yprev, orient):
+    dirs = getSurrounds(x, y)            # N, E, S, W
+    best_dir = None
+    best_val = 10000
 
-    minCount=0
-    for i in range(4):
-        if minVals[i]== -1:
-            pass
-        elif minVals[i]== val+1 :
-            pass
-        elif minVals[i]== val-1 :
-            minCount+=1
-            pass
+    for i, (xi, yi) in enumerate(dirs):
+        if xi < 0 or yi < 0:
+            continue
+        if not isAccessible(x, y, xi, yi):
+            continue
+        v = flood[yi][xi]
+        if v < best_val:
+            best_val = v
+            best_dir = i
 
-    #minVal= min(minVals)
+    if best_dir is None:
+        log(f"No accessible neighbour from ({x}, {y})")
+        return None
 
-    #return(minVal)
-    
-    if (minCount>0):
-        return (True)
-    else:
-        return (False)
-
-def makeConsistant(x,y):
-    x0,y0,x1,y1,x2,y2,x3,y3 = getSurrounds(x,y)
-
-    val= flood[y][x]
-    minVals=[-1,-1,-1,-1]
-    if (x0>=0 and y0>=0):
-        if (isAccessible(x,y,x0,y0)):
-            minVals[0]=flood[y0][x0]
-            #if (flood[y0][x0]<minVal):
-            #minVals.append(flood[y0][x0])
-                #minVal= flood[y0][x0]
-    if (x1>=0 and y1>=0):
-        if (isAccessible(x,y,x1,y1)):
-            minVals[1]=flood[y1][x1]
-            #if (flood[y1][x1]<minVal):
-            #minVals.append(flood[y1][x1])
-                #minVal= flood[y1][x1]
-    if (x2>=0 and y2>=0):
-        if (isAccessible(x,y,x2,y2)):
-            minVals[2]=flood[y2][x2]
-            #if (flood[y2][x2]<minVal):
-            #minVals.append(flood[y1][x1])
-                #minVal= flood[y2][x2]
-    if (x3>=0 and y3>=0):
-        if (isAccessible(x,y,x3,y3)):
-            minVals[3]=flood[y3][x3]
-            #if (flood[y3][x3]<minVal):
-            #minVals.append(flood[y1][x1])
-                #minVal= flood[y3][x3]
-
-    for i in range(4):
-        if minVals[i]== -1:
-            minVals[i]= 1000
-
-    minVal= min(minVals)
-    flood[y][x]= minVal+1
-
-def floodFill(x,y,xprev,yprev):
-    '''updates the flood matrix such that every square is consistant (current cell is x,y)
-    '''
-    if not isConsistant(x,y):
-        flood[y][x]= flood[yprev][xprev]+1
-        
-    stack=[]
-    stack.append(x)
-    stack.append(y)
-    x0,y0,x1,y1,x2,y2,x3,y3= getSurrounds(x,y)
-    if(x0>=0 and y0>=0):
-        if (isAccessible(x,y,x0,y0)):
-            stack.append(x0)
-            stack.append(y0)
-    if(x1>=0 and y1>=0):
-        if (isAccessible(x,y,x1,y1)):
-            stack.append(x1)
-            stack.append(y1)
-    if(x2>=0 and y2>=0):
-        if (isAccessible(x,y,x2,y2)):
-            stack.append(x2)
-            stack.append(y2)
-    if(x3>=0 and y3>=0):
-        if (isAccessible(x,y,x3,y3)):
-            stack.append(x3)
-            stack.append(y3)
-
-    while (len(stack)!= 0):
-        yrun= stack.pop()
-        xrun= stack.pop()
-
-        if isConsistant(xrun,yrun):
-            pass
-        else:
-            makeConsistant(xrun,yrun)
-            stack.append(xrun)
-            stack.append(yrun)
-            x0,y0,x1,y1,x2,y2,x3,y3= getSurrounds(xrun,yrun)
-            if(x0>=0 and y0>=0):
-                if (isAccessible(xrun,yrun,x0,y0)):
-                    stack.append(x0)
-                    stack.append(y0)
-            if(x1>=0 and y1>=0):
-                if (isAccessible(xrun,yrun,x1,y1)):
-                    stack.append(x1)
-                    stack.append(y1)
-            if(x2>=0 and y2>=0):
-                if (isAccessible(xrun,yrun,x2,y2)):
-                    stack.append(x2)
-                    stack.append(y2)
-            if(x3>=0 and y3>=0):
-                if (isAccessible(xrun,yrun,x3,y3)):
-                    stack.append(x3)
-                    stack.append(y3)
-        #break
+    # Convert best_dir (0-3) to turn command
+    diff = (best_dir - orient) % 4
+    return ('F', 'R', 'B', 'L')[diff]
 
 
 
 
-    '''if isConsistant(x,y):
-        return
-    else:
-        #API.setText(x,y,str(isConsistant(x,y)))
-        #return
-        fill=True
-        while(fill==True):
-            fill= False
-            #API.setColor(x,y,'green')
-            for yrun in range(16):
-                for xrun in range(16):
-                    if (isConsistant(xrun,yrun)):
-                       pass
-                    else:
-                        fill = True
-                        makeConsistant(xrun,yrun)
 
-            #break 
-                        
-            if (fill==False):    
-                break
-
-        API.setColor(x,y,'green')
-
-        
-            for yrun in range(y+1):
-                for xrun in range(x):
-                    if not (isConsistant(xrun,yrun)):
-                        fill = True
-                        makeConsistant(xrun,yrun)
-
-            for yrun in range(y+1,16):
-                for xrun in range(x+1):
-                    if not (isConsistant(xrun,yrun)):
-                        fill = True
-                        makeConsistant(xrun,yrun)
-
-            for yrun in range(y,16):
-                for xrun in range(x+1,16):
-                    if not (isConsistant(xrun,yrun)):
-                        fill = True
-                        makeConsistant(xrun,yrun) 
-
-            for yrun in range(y):
-                for xrun in range(x,16):
-                    if not (isConsistant(xrun,yrun)):
-                        fill = True
-                        makeConsistant(xrun,yrun)  ''' 
-                        
-def toMove(x,y,xprev,yprev,orient):
-    '''returns the direction to turn into L,F,R or B
-    '''
-    x0,y0,x1,y1,x2,y2,x3,y3 = getSurrounds(x,y)
-    val= flood[y][x]
-    prev=0
-    minVals=[1000,1000,1000,1000]
-
-    if (isAccessible(x,y,x0,y0)):
-        if (x0==xprev and y0==yprev):
-            prev=0
-        minVals[0]= flood[y0][x0]
-
-    if (isAccessible(x,y,x1,y1)):
-        if (x1==xprev and y1==yprev):
-            prev=1
-        minVals[1]= flood[y1][x1]
-
-    if (isAccessible(x,y,x2,y2)):
-        if (x2==xprev and y2==yprev):
-            prev=2
-        minVals[2]= flood[y2][x2]
-
-    if (isAccessible(x,y,x3,y3)):
-        if (x3==xprev and y3==yprev):
-            prev=3
-        minVals[3]= flood[y3][x3]
-
-    minVal=minVals[0]
-    minCell=0
-    noMovements=0
-    for i in minVals:
-        if (i!=1000):
-            noMovements+=1
-
-    '''for i in range(4):
-        if (minVals[i]<minVal):
-            minVal= minVals[i]
-            minCell= i'''
-
-    for i in range(4):
-        if (minVals[i]<minVal):
-            if (noMovements==1):
-                minVal= minVals[i]
-                minCell= i
-            else:
-                if(i==prev):
-                    pass
-                else:
-                    minVal= minVals[i]
-                    minCell= i
-
-    if (minCell==orient):
-        return ('F')
-    elif((minCell==orient-1) or (minCell== orient+3)):
-        return('L')
-    elif ((minCell==orient+1) or (minCell== orient-3)):
-        return('R')
-    else:
-        return('B')
-
-
-def toMoveBack(x,y,xprev,yprev,orient):
-    '''returns the direction to turn into L,F,R or B
-    '''
-    x0,y0,x1,y1,x2,y2,x3,y3 = getSurrounds(x,y)
-    val= flood[y][x]
-    prev=0
-    minVals=[1000,1000,1000,1000]
-
-    if (isAccessible(x,y,x0,y0)):
-        if (x0==xprev and y0==yprev):
-            prev=0
-        minVals[0]= flood[y0][x0]
-
-    if (isAccessible(x,y,x1,y1)):
-        if (x1==xprev and y1==yprev):
-            prev=1
-        minVals[1]= flood[y1][x1]
-
-    if (isAccessible(x,y,x2,y2)):
-        if (x2==xprev and y2==yprev):
-            prev=2
-        minVals[2]= flood[y2][x2]
-
-    if (isAccessible(x,y,x3,y3)):
-        if (x3==xprev and y3==yprev):
-            prev=3
-        minVals[3]= flood[y3][x3]
-
-    maxVal=minVals[0]
-    minCell=0
-    noMovements=0
-    for i in minVals:
-        if (i!=1000):
-            noMovements+=1
-
-    for i in range(4):
-        if (minVals[i]!=1000 and minVals[i]> maxVal):
-            if (noMovements==1):
-                minVal= minVals[i]
-                minCell= i
-
-            else:
-                if(i==prev):
-                    pass
-                else:
-                    minVal= minVals[i]
-                    minCell= i
-
-    #return(minCell)
-    if (minCell==orient):
-        return ('F')
-    elif((minCell==orient-1) or (minCell== orient+3)):
-        return('L')
-    elif ((minCell==orient+1) or (minCell== orient-3)):
-        return('R')
-    else:
-        return('B')
-
-#def deadEnd(x,y):
-
-
-def showFlood(xrun,yrun):
+def showFlood(xrun, yrun):
     for x in range(16):
         for y in range(16):
-            API.setText(x,y,str(flood[y][x]))
+            API.setText(x, y, str(flood[y][x]))
+
+def debugFlood(x, y):
+    log(f"At ({x}, {y}), flood value: {flood[y][x]}")
+    dirs = getSurrounds(x, y)
+    for i, (xi, yi) in enumerate(dirs):
+        if xi >= 0 and yi >= 0:
+            accessible = isAccessible(x, y, xi, yi)
+            log(f"  Dir {i}: ({xi}, {yi}) - Accessible: {accessible}, Flood: {flood[yi][xi]}")
 
 def main():
     x = 0
@@ -512,27 +190,30 @@ def main():
     orient = 0
 
     while True:
-        # Read wall sensors
-        L = API.wallLeft()
-        R = API.wallRight()
-        F = API.wallFront()
-        updateWalls(x, y, orient, L, R, F)
-
-        # Stop if robot reaches the center
+        # Check goal IMMEDIATELY after moving
         if (x, y) in [(7, 7), (7, 8), (8, 7), (8, 8)]:
             log(f"GOAL REACHED at ({x}, {y})")
             API.setColor(x, y, "G")
             break
 
-        if (flood[y][x] != 0):
-            floodFill(x, y, xprev, yprev)
-        else:
-            while True:
-                pass  # This will never happen now since we handle center above
+        L = API.wallLeft()
+        R = API.wallRight()
+        F = API.wallFront()
+        updateWalls(x, y, orient, L, R, F)
 
-        # Decide next move direction
+        # Run flood fill after updating walls
+        floodFill()  # No parameters needed now
+
+        highlightPath(x, y)
+
+        debugFlood(x, y)
+
         direction = toMove(x, y, xprev, yprev, orient)
-
+        if direction is None:
+            log(f"No valid move found at ({x}, {y})")
+            break
+            
+        # Handle turning
         if direction == 'L':
             API.turnLeft()
             orient = API.orientation(orient, 'L')
@@ -545,20 +226,19 @@ def main():
             API.turnLeft()
             orient = API.orientation(orient, 'L')
 
-        # Compute next coordinates and log before move
+        # Move forward
         xnext, ynext = API.updateCoordinates(x, y, orient)
         log(f"Moving from ({x}, {y}) to -> ({xnext}, {ynext}), facing {orient}")
-        showFlood(x, y)
-
-        # Move forward and update position
+        
         API.moveForward()
         xprev = x
         yprev = y
         x = xnext
         y = ynext
 
-        
-        
+        showFlood(x, y)
+
 
 if __name__ == "__main__":
     main()
+
