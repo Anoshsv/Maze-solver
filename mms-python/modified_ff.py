@@ -26,6 +26,8 @@ def _record_wall(x, y, direction):
     xn, yn = x + dx, y + dy
     if 0 <= xn < 16 and 0 <= yn < 16:
         updateWalls.walls[(xn, yn, OPP_DIR[direction])] = True
+
+
 def updateWalls(x, y, orient, L, R, F):
     if not hasattr(updateWalls, 'walls'):
         updateWalls.walls = {}
@@ -53,6 +55,29 @@ def updateWalls(x, y, orient, L, R, F):
     
     return walls_changed
 
+def markDeadEnds():
+    for y in range(16):
+        for x in range(16):
+            if (x, y) in [(7, 7), (7, 8), (8, 7), (8, 8)]:
+                continue  # Skip goal cells
+                
+            accessible_neighbors = 0
+            for dx, dy, direction in [(0, 1, 'n'), (1, 0, 'e'), (0, -1, 's'), (-1, 0, 'w')]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < 16 and 0 <= ny < 16:
+                    if not hasWall(x, y, direction):
+                        accessible_neighbors += 1
+            
+            if accessible_neighbors <= 1:
+                flood[y][x] = 9999  # Mark as dead end
+                if not hasattr(markDeadEnds, 'dead_ends'):
+                    markDeadEnds.dead_ends = set()
+                markDeadEnds.dead_ends.add((x, y))
+                # Visualize dead end with red color and 'X' text
+                API.setColor(x, y, "R")
+                API.setText(x, y, "X")
+                log(f"Dead end marked at ({x}, {y})")
+
 
 def hasWall(x, y, direction):
     if not hasattr(updateWalls, 'walls'):
@@ -62,6 +87,10 @@ def hasWall(x, y, direction):
 
 def isAccessible(x, y, x1, y1):
     if abs(x - x1) + abs(y - y1) != 1:
+        return False
+    
+    # Block movement to known dead ends
+    if hasattr(markDeadEnds, 'dead_ends') and (x1, y1) in markDeadEnds.dead_ends:
         return False
     
     if x1 == x and y1 == y + 1:  # Going north
@@ -74,6 +103,7 @@ def isAccessible(x, y, x1, y1):
         return not hasWall(x, y, "w")
     
     return False
+
 
 
 def getSurrounds(x, y):
@@ -90,32 +120,33 @@ def getSurrounds(x, y):
 
 
 def floodFill():
-    # Reset all flood values except goal cells
-    for y_iter in range(16):
-        for x_iter in range(16):
-            if (x_iter, y_iter) in [(7, 7), (7, 8), (8, 7), (8, 8)]:
-                flood[y_iter][x_iter] = 0
-            else:
-                flood[y_iter][x_iter] = 1000
-
-    # BFS from goal cells outward
-    queue = deque([(7, 7), (7, 8), (8, 7), (8, 8)])
-
+    # Initialize all cells to high value
+    for y in range(16):
+        for x in range(16):
+            flood[y][x] = 1000
+    
+    # Set goal cells to 0 and start BFS from all goal cells simultaneously
+    goal_cells = [(7, 7), (7, 8), (8, 7), (8, 8)]
+    queue = deque()
+    
+    for gx, gy in goal_cells:
+        flood[gy][gx] = 0
+        queue.append((gx, gy))
+    
+    # BFS flood fill from all goal cells
     while queue:
         x_curr, y_curr = queue.popleft()
         curr_val = flood[y_curr][x_curr]
-
-        # Check all 4 directions
+        
         for dx, dy, direction in [(0, 1, 'n'), (1, 0, 'e'), (0, -1, 's'), (-1, 0, 'w')]:
-            x_n = x_curr + dx
-            y_n = y_curr + dy
-            
+            x_n, y_n = x_curr + dx, y_curr + dy
             if 0 <= x_n < 16 and 0 <= y_n < 16:
-                # Check if there's no wall between current and neighbor
                 if not hasWall(x_curr, y_curr, direction):
-                    if flood[y_n][x_n] > curr_val + 1:
-                        flood[y_n][x_n] = curr_val + 1
+                    new_val = curr_val + 1
+                    if flood[y_n][x_n] > new_val:
+                        flood[y_n][x_n] = new_val
                         queue.append((x_n, y_n))
+
 
 
 def highlightPath(x, y):
@@ -149,24 +180,53 @@ def highlightPath(x, y):
 
 def toMove(x, y, xprev, yprev, orient):
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]  # N, E, S, W
-    best_dir = None
-    best_val = 10000
     
+    candidates = []
+    min_flood_val = 10000
+    
+    # Find minimum flood value first, excluding dead ends
     for i, (dx, dy) in enumerate(directions):
         xi, yi = x + dx, y + dy
         if not (0 <= xi < 16 and 0 <= yi < 16):
             continue
         if not isAccessible(x, y, xi, yi):
             continue
-        v = flood[yi][xi]
-        if v < best_val:
-            best_val = v
-            best_dir = i
-    
-    if best_dir is None:
-        log(f"No accessible neighbour from ({x}, {y})")
-        return None
         
+        # Skip known dead ends
+        if hasattr(markDeadEnds, 'dead_ends') and (xi, yi) in markDeadEnds.dead_ends:
+            continue
+            
+        v = flood[yi][xi]
+        if v < min_flood_val:
+            min_flood_val = v
+    
+    # Collect all cells with minimum flood value, excluding dead ends
+    for i, (dx, dy) in enumerate(directions):
+        xi, yi = x + dx, y + dy
+        if not (0 <= xi < 16 and 0 <= yi < 16):
+            continue
+        if not isAccessible(x, y, xi, yi):
+            continue
+            
+        # Skip known dead ends
+        if hasattr(markDeadEnds, 'dead_ends') and (xi, yi) in markDeadEnds.dead_ends:
+            continue
+        
+        v = flood[yi][xi]
+        if v == min_flood_val:
+            candidates.append((i, xi, yi))
+    
+    if not candidates:
+        log(f"No non-dead-end moves available from ({x}, {y})")
+        return None
+    
+    # Prefer straight movement (no turn)
+    for dir_idx, xi, yi in candidates:
+        if dir_idx == orient:  # Straight ahead
+            return 'F'
+    
+    # If no straight option, choose direction requiring minimal turns
+    best_dir = candidates[0][0]
     diff = (best_dir - orient) % 4
     return ('F', 'R', 'B', 'L')[diff]
 
@@ -209,15 +269,23 @@ def main():
 
         if walls_changed:
             floodFill()
+            # Mark dead ends more frequently for better detection
+            if len(updateWalls.walls) % 5 == 0:  # Every 5 walls instead of 10
+                markDeadEnds()
 
         highlightPath(x, y)
-
         debugFlood(x, y)
 
         direction = toMove(x, y, xprev, yprev, orient)
         if direction is None:
             log(f"No valid move found at ({x}, {y})")
-            break
+            # Try to clear dead end marks and recalculate
+            if hasattr(markDeadEnds, 'dead_ends'):
+                floodFill()
+                direction = toMove(x, y, xprev, yprev, orient)
+            
+            if direction is None:
+                break
             
         # Handle turning
         if direction == 'L':
@@ -243,7 +311,6 @@ def main():
         y = ynext
 
         showFlood(x, y)
-
 
 if __name__ == "__main__":
     main()
